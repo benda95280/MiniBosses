@@ -2,16 +2,18 @@
 
 namespace MiniBosses;
 
-use InvalidArgumentException;
 use pocketmine\entity\Creature;
 use pocketmine\entity\EntityIds;
 use pocketmine\entity\Living;
 use pocketmine\entity\Skin;
 use pocketmine\event\entity\EntityDamageByEntityEvent;
 use pocketmine\event\entity\EntityDamageEvent;
+use pocketmine\math\Vector3;
+use pocketmine\block\Block;
 use pocketmine\item\Item;
 use pocketmine\level\Level;
 use pocketmine\level\Position;
+use pocketmine\level\particle\DestroyBlockParticle;
 use pocketmine\nbt\LittleEndianNBTStream;
 use pocketmine\nbt\tag\ByteArrayTag;
 use pocketmine\nbt\tag\CompoundTag;
@@ -19,13 +21,14 @@ use pocketmine\nbt\tag\DoubleTag;
 use pocketmine\nbt\tag\IntTag;
 use pocketmine\nbt\tag\ListTag;
 use pocketmine\nbt\tag\StringTag;
-use pocketmine\network\mcpe\protocol\AddActorPacket;
+use pocketmine\network\mcpe\protocol\AddEntityPacket;
 use pocketmine\network\mcpe\protocol\AddPlayerPacket;
 use pocketmine\network\mcpe\protocol\MobEquipmentPacket;
 use pocketmine\network\mcpe\protocol\PlayerListPacket;
 use pocketmine\network\mcpe\protocol\types\PlayerListEntry;
 use pocketmine\Player;
 use pocketmine\utils\UUID;
+use pocketmine\utils\TextFormat;
 
 class Boss extends Creature{
 
@@ -47,6 +50,8 @@ class Boss extends Creature{
 	/** @var Item  */
 	public $heldItem;
 	public $autoAttack;
+	
+
 
 	public function __construct(Level $level,CompoundTag $nbt){
 		$this->scale = $nbt->getFloat("scale",1);
@@ -85,7 +90,7 @@ class Boss extends Creature{
 	 * @param CompoundTag $nbt
 	 *
 	 * @return Skin
-	 * @throws InvalidArgumentException
+	 * @throws \InvalidArgumentException
 	 */
 	private function deserializeSkinNBT(CompoundTag $nbt) : Skin{
 		if($nbt->hasTag("skin",StringTag::class)){
@@ -147,7 +152,7 @@ class Boss extends Creature{
 			$pk->entries = [PlayerListEntry::createRemovalEntry($uuid)];
 			$player->dataPacket($pk);
 		}else{
-			$pk = new AddActorPacket();
+			$pk = new AddEntityPacket();
 			$pk->entityRuntimeId = $this->getID();
 			$pk->type = $this->networkId;
 			$pk->position = $this->asVector3();
@@ -254,8 +259,24 @@ class Boss extends Creature{
 						$this->move($this->motion->x, $this->motion->y, $this->motion->z);
 						if($this->distanceSquared($player) < $this->scale && $this->attackDelay++ > $this->attackRate){
 							$this->attackDelay = 0;
-							$ev = new EntityDamageByEntityEvent($this, $player, EntityDamageEvent::CAUSE_ENTITY_ATTACK, $this->attackDamage);
+							if (rand(0,100) > 87) {
+								$finalAttackDamage = $this->attackDamage * 2;
+								$player->sendTip(TextFormat::RED . "** Critical HIT: ".$finalAttackDamage. " **");
+							}
+							else $finalAttackDamage = $this->attackDamage;							
+							
+							$ev = new EntityDamageByEntityEvent($this, $player, EntityDamageEvent::CAUSE_ENTITY_ATTACK, $finalAttackDamage);
 							$player->attack($ev);
+							
+							if (rand(0,100) > 90) { 
+								if (rand(1,2) == 2)	$this->move($this->motion->x + rand(0,1), $this->motion->y, $this->motion->z + rand(0,3));
+								else $this->move($this->motion->x - rand(4,5), $this->motion->y, $this->motion->z + rand(0,3));
+							}
+							elseif  (rand(0,100) > 35) {
+								$this->move($this->motion->x + rand(1,2), $this->motion->y, $this->motion->z + 1);
+																$player->sendTip(TextFormat::RED . "** Little move **");
+
+							}
 						}
 					}
 				}
@@ -272,19 +293,28 @@ class Boss extends Creature{
 
 	public function attack(EntityDamageEvent $source): void{
 		if(!$source->isCancelled() && $source instanceof EntityDamageByEntityEvent){
+			$entity = $source->getEntity();
 			$dmg = $source->getDamager();
 			if($dmg instanceof Player){
 				parent::attack($source);
 				if(!$source->isCancelled()){
+					$this->sprayBlood($entity,1); //Need pass damage to function
 					$this->target = $dmg;
 					$this->motion->x = ($this->x - $dmg->x) * 0.19;
 					$this->motion->y = 0.5;
 					$this->motion->z = ($this->z - $dmg->z) * 0.19;
-					$this->knockbackTicks = 10;
+					$this->knockbackTicks = rand(0,12);
 				}
 			}
         }
     }
+
+	public function sprayBlood(Boss $entity, $amplifier) : void{
+		$amplifier = (int) round($amplifier / 15);
+		for($i = 0; $i <= $amplifier; $i ++){
+			$entity->getLevel()->addParticle(new DestroyBlockParticle(new Vector3($entity->x, $entity->y, $entity->z), Block::get(152)));
+		}
+	}
 
 	public function kill():void {
 		parent::kill();
