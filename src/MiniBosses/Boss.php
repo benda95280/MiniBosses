@@ -14,6 +14,7 @@ use pocketmine\item\Item;
 use pocketmine\level\Level;
 use pocketmine\level\Position;
 use pocketmine\level\particle\DestroyBlockParticle;
+use pocketmine\level\particle\FloatingTextParticle;
 use pocketmine\nbt\LittleEndianNBTStream;
 use pocketmine\nbt\tag\ByteArrayTag;
 use pocketmine\nbt\tag\CompoundTag;
@@ -269,13 +270,14 @@ class Boss extends Creature{
 							$player->attack($ev);
 							
 							if (rand(0,100) > 90) { 
-								if (rand(1,2) == 2)	$this->move($this->motion->x + rand(0,1), $this->motion->y, $this->motion->z + rand(0,3));
-								else $this->move($this->motion->x - rand(4,5), $this->motion->y, $this->motion->z + rand(0,3));
-							}
-							elseif  (rand(0,100) > 35) {
-								$this->move($this->motion->x + rand(1,2), $this->motion->y, $this->motion->z + 1);
-																$player->sendTip(TextFormat::RED . "** Little move **");
-
+								$blocks = 2;
+								$angle = rand(40,180);
+								$x = $this->motion->x;
+								$z = $this->motion->z;
+								$yaw = $this->yaw - $angle;
+								$deltaX = sin($yaw)*$blocks;
+								$deltaZ = cos($yaw)*$blocks;
+								$this->move(round($deltaX+$x), $this->motion->y, round($deltaZ+$z));
 							}
 						}
 					}
@@ -295,6 +297,7 @@ class Boss extends Creature{
 		if(!$source->isCancelled() && $source instanceof EntityDamageByEntityEvent){
 			$entity = $source->getEntity();
 			$dmg = $source->getDamager();
+			$damage = $source->getFinalDamage();
 			if($dmg instanceof Player){
 				parent::attack($source);
 				if(!$source->isCancelled()){
@@ -304,10 +307,39 @@ class Boss extends Creature{
 					$this->motion->y = 0.5;
 					$this->motion->z = ($this->z - $dmg->z) * 0.19;
 					$this->knockbackTicks = rand(0,12);
+
+					 if ($damage < 3) {
+						 $color = TextFormat::GREEN;
+					 } else {
+						 if ($damage < 6) {
+							 $color = TextFormat::YELLOW;
+						 } else {
+							 $color = TextFormat::RED;
+						 }
+					 }
+					 $pos = $source->getEntity()->add(0.1 * mt_rand(1, 9) * mt_rand(-1, 1), 0.1 * mt_rand(5, 9), 0.1 * mt_rand(1, 9) * mt_rand(-1, 1));
+					 $damageParticle = new FloatingTextParticle($pos, "", $color . "-" . $damage);
+					 if ($source->getEntity()->getHealth() < 7) {
+						 $color = TextFormat::RED;
+					 } else {
+						 if ($source->getEntity()->getHealth() < 14) {
+							 $color = TextFormat::YELLOW;
+						 } else {
+							 $color = TextFormat::GREEN;
+						 }
+					 }
+					 $pos = $source->getEntity()->add(0, 1.5, 0);
+					 $healthParticle = new FloatingTextParticle($pos, "", $color . ($source->getEntity()->getHealth() - $damage) . " / " . $source->getEntity()->getMaxHealth());
+					 var_dump ($healthParticle);
+					 var_dump ($damageParticle);
+					 $this->plugin->getScheduler()->scheduleDelayedTask(new EventCheckTask($this, $damageParticle, $source->getEntity()->getLevel(), $source), 1);
+					 $this->plugin->getScheduler()->scheduleDelayedTask(new EventCheckTask($this, $healthParticle, $source->getEntity()->getLevel(), $source), 1);
+
 				}
 			}
         }
     }
+
 
 	public function sprayBlood(Boss $entity, $amplifier) : void{
 		$amplifier = (int) round($amplifier / 15);
@@ -337,4 +369,15 @@ class Boss extends Creature{
 		$this->drops = [];
 		$this->heldItem = null;
 	}
+	
+	public function eventCheck(FloatingTextParticle $particle, Level $level, $event) {
+		if ($event instanceof EntityDamageEvent) if ($event->isCancelled ()) return;
+		$level->addParticle ( $particle );
+		$this->plugin->getScheduler ()->scheduleDelayedTask ( new DeleteParticlesTask ( $this, $particle, $event->getEntity ()->getLevel () ), 20 );
+	}
+	public function deleteParticles(FloatingTextParticle $particle, Level $level) {
+		$particle->setInvisible ();
+		$level->addParticle ( $particle );
+	}
+
 }
