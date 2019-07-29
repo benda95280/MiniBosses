@@ -8,6 +8,7 @@ use pocketmine\entity\Living;
 use pocketmine\entity\Skin;
 use pocketmine\event\entity\EntityDamageByEntityEvent;
 use pocketmine\event\entity\EntityDamageEvent;
+use pocketmine\math\Math;
 use pocketmine\math\Vector3;
 use pocketmine\block\Block;
 use pocketmine\item\Item;
@@ -212,6 +213,7 @@ class Boss extends Creature{
 	}
 
 	public function onUpdate(int $currentTick): bool {
+		$tickDiff = $currentTick - $this->lastUpdate;
 		if($this->knockbackTicks > 0) $this->knockbackTicks--;
 		if($this->isAlive()){
 			$player = $this->target;
@@ -231,56 +233,67 @@ class Boss extends Creature{
 					$this->setHealth($this->getMaxHealth());
 					$this->target = null;
 				} else{
-					if(!$this->onGround){
-						if($this->motion->y > -$this->gravity * 4){
-							$this->motion->y = -$this->gravity * 4;
-						} else{
-							$this->motion->y -= $this->gravity;
-						}
-						$this->move($this->motion->x, $this->motion->y, $this->motion->z);
-					} elseif($this->knockbackTicks > 0){
-
-					} else{
-						$x = $player->x - $this->x;
-						$y = $player->y - $this->y;
-						$z = $player->z - $this->z;
-						if($x ** 2 + $z ** 2 < 0.7){
-							$this->motion->x = 0;
-							$this->motion->z = 0;
-						} else{
-							$diff = abs($x) + abs($z);
-							$this->motion->x = $this->speed * 0.15 * ($x / $diff);
-							$this->motion->z = $this->speed * 0.15 * ($z / $diff);
-						}
-						$this->yaw = rad2deg(atan2(-$x, $z));
-						if($this->networkId === EntityIds::ENDER_DRAGON){
-							$this->yaw += 180;
-						}
-						$this->pitch = rad2deg(atan(-$y));
-						$this->move($this->motion->x, $this->motion->y, $this->motion->z);
-						if($this->distanceSquared($player) < $this->scale && $this->attackDelay++ > $this->attackRate){
-							$this->attackDelay = 0;
-							if (rand(0,100) > 87) {
-								$finalAttackDamage = $this->attackDamage * 2;
-								$player->sendTip(TextFormat::RED . "** Critical HIT: ".$finalAttackDamage. " **");
+					$dx = $this->motion->x * $tickDiff;
+					$dz = $this->motion->z * $tickDiff;
+					$isJump = false;
+					if ($this->isCollidedHorizontally or $this->isUnderwater()) {
+						$isJump = $this->checkJump($dx, $dz);
+						echo "checkjump";	
+					}
+					if(!$isJump){
+						if(!$this->onGround){
+							if($this->motion->y > -$this->gravity * 4){
+								$this->motion->y = -$this->gravity * 4;
+							} else{
+								$this->motion->y -= $this->gravity;
 							}
-							else $finalAttackDamage = $this->attackDamage;							
-							
-							$ev = new EntityDamageByEntityEvent($this, $player, EntityDamageEvent::CAUSE_ENTITY_ATTACK, $finalAttackDamage);
-							$player->attack($ev);
-							
-							if (rand(0,100) > 90) { 
-								$blocks = 2;
-								$angle = rand(40,180);
-								$x = $this->motion->x;
-								$z = $this->motion->z;
-								$yaw = $this->yaw - $angle;
-								$deltaX = sin($yaw)*$blocks;
-								$deltaZ = cos($yaw)*$blocks;
-								$this->move(round($deltaX+$x), $this->motion->y, round($deltaZ+$z));
-							}
+							$this->move($this->motion->x, $this->motion->y, $this->motion->z);
+						} 
+						if($this->knockbackTicks > 0){
 						}
 					}
+						
+							$x = $player->x - $this->x;
+							$y = $player->y - $this->y;
+							$z = $player->z - $this->z;
+							if($x ** 2 + $z ** 2 < 0.7){
+								$this->motion->x = 0;
+								$this->motion->z = 0;
+							} else{
+								$diff = abs($x) + abs($z);
+								$this->motion->x = $this->speed * 0.15 * ($x / $diff);
+								$this->motion->z = $this->speed * 0.15 * ($z / $diff);
+							}
+							$this->yaw = rad2deg(atan2(-$x, $z));
+							if($this->networkId === EntityIds::ENDER_DRAGON){
+								$this->yaw += 180;
+							}
+							$this->pitch = rad2deg(atan(-$y));
+							$this->move($this->motion->x, $this->motion->y, $this->motion->z);
+							if($this->distanceSquared($player) < $this->scale && $this->attackDelay++ > $this->attackRate){
+								$this->attackDelay = 0;
+								if (mt_rand(0,100) > 87) {
+									$finalAttackDamage = $this->attackDamage * 2;
+									$player->sendTip(TextFormat::RED . "** Critical HIT: ".$finalAttackDamage. " **");
+								}
+								else $finalAttackDamage = $this->attackDamage;							
+								
+								$ev = new EntityDamageByEntityEvent($this, $player, EntityDamageEvent::CAUSE_ENTITY_ATTACK, $finalAttackDamage);
+								$player->attack($ev);
+								// Monster turn arround player
+								if (mt_rand(0,100) > 90 && !$isJump) { 
+									$blocks = 2;
+									$angle = mt_rand(40,180);
+									$x = $this->motion->x;
+									$z = $this->motion->z;
+									$yaw = $this->yaw - $angle;
+									$deltaX = sin($yaw)*$blocks;
+									$deltaZ = cos($yaw)*$blocks;
+									$this->move(round($deltaX+$x), $this->motion->y, round($deltaZ+$z));
+								}
+							}
+						
+					
 				}
 			}else{
 				$this->setPosition($this->spawnPos);
@@ -300,13 +313,24 @@ class Boss extends Creature{
 			$damage = $source->getFinalDamage();
 			if($dmg instanceof Player){
 				parent::attack($source);
+				// ###MISSED HIT###
+				if (mt_rand(0,100) > 90) {
+					echo "Missed";
+					$pos = $source->getEntity()->add(0.1 * mt_rand(1, 9) * mt_rand(-1, 1), 0.1 * mt_rand(5, 9), 0.1 * mt_rand(1, 9) * mt_rand(-1, 1));
+					$missedParticle = new FloatingTextParticle($pos, "", TextFormat::GRAY . "MISS");
+					$this->plugin->getScheduler()->scheduleDelayedTask(new EventCheckTask($this, $missedParticle, $source->getEntity()->getLevel(), $source), 1);
+					$dirVec = $entity->getDirectionVector();
+					$entity->setMotion(new Vector3($dirVec->getX(), -0.3, $dirVec->getZ()));
+					$source->setCancelled(true);
+				}
+				// ###HIT###
 				if(!$source->isCancelled()){
-					$this->sprayBlood($entity,1); //Need pass damage to function
+					$this->sprayBlood($entity,$damage); //Need pass damage to function
 					$this->target = $dmg;
 					$this->motion->x = ($this->x - $dmg->x) * 0.19;
 					$this->motion->y = 0.5;
 					$this->motion->z = ($this->z - $dmg->z) * 0.19;
-					$this->knockbackTicks = rand(0,12);
+					$this->knockbackTicks = mt_rand(0,12);
 
 					 if ($damage < 3) {
 						 $color = TextFormat::GREEN;
@@ -330,8 +354,6 @@ class Boss extends Creature{
 					 }
 					 $pos = $source->getEntity()->add(0, 1.5, 0);
 					 $healthParticle = new FloatingTextParticle($pos, "", $color . ($source->getEntity()->getHealth() - $damage) . " / " . $source->getEntity()->getMaxHealth());
-					 var_dump ($healthParticle);
-					 var_dump ($damageParticle);
 					 $this->plugin->getScheduler()->scheduleDelayedTask(new EventCheckTask($this, $damageParticle, $source->getEntity()->getLevel(), $source), 1);
 					 $this->plugin->getScheduler()->scheduleDelayedTask(new EventCheckTask($this, $healthParticle, $source->getEntity()->getLevel(), $source), 1);
 
@@ -339,6 +361,106 @@ class Boss extends Creature{
 			}
         }
     }
+	
+
+
+	/**
+	 * This method checks the jumping for the entity. It should only be called when isCollidedHorizontally is set to
+	 * true on the entity.
+	 *
+	 * @param int $dx
+	 * @param int $dz
+	 *
+	 * @return bool
+	 */
+	protected function checkJump($dx, $dz){
+		echo "$this: entering checkJump [dx:$dx] [dz:$dz]";
+					echo"Testjump";
+		if($this->motion->y == $this->gravity * 2){ // swimming
+			// PureEntities::logOutput("$this: checkJump(): motionY == gravity*2");
+			return $this->getLevel()->getBlock(new Vector3(Math::floorFloat($this->x), (int) $this->y, Math::floorFloat($this->z))) instanceof Liquid;
+		}else{ // dive up?
+			if($this->getLevel()->getBlock(new Vector3(Math::floorFloat($this->x), (int) ($this->y + 0.8), Math::floorFloat($this->z))) instanceof Liquid){
+				// PureEntities::logOutput("$this: checkJump(): instanceof liquid");
+				$this->motion->y = $this->gravity * 2; // set swimming (rather walking on water ;))
+				return true;
+			}
+		}
+		if($this->getDirection() === null){ // without a direction jump calculation is not possible!
+			// PureEntities::logOutput("$this: checkJump(): no direction given ...");
+			echo"Pas de direction";
+			return false;
+		}
+		echo"Testjump2";
+		// PureEntities::logOutput("$this: checkJump(): position is [x:" . $this->x . "] [y:" . $this->y . "] [z:" . $this->z . "]");
+		// sometimes entities overlap blocks and the current position is already the next block in front ...
+		// they overlap especially when following an entity - you can see it when the entity (e.g. creeper) is looking
+		// in your direction but cannot jump (is stuck). Then the next line should apply
+									$blocks = 2;
+									$x = $this->x;
+									$z = $this->z;
+									$yaw = $this->yaw - 180;
+									$deltaX = sin($yaw)*$blocks;
+									$deltaZ = cos($yaw)*$blocks;		
+		// $blockingBlock = $this->getLevel()->getBlock($this->getPosition());
+		$blockingBlock = $this->getLevel()->getBlock(new Vector3(round($deltaX+$x), $this->y, round($deltaZ+$z)));
+		var_dump($blockingBlock);
+		if($blockingBlock->canPassThrough()){ // when we can pass through the current block then the next block is blocking the way
+			echo"canPassThrough";
+
+			try{
+									$blocks = 3;
+									$x = $this->x;
+									$z = $this->z;
+									$yaw = $this->yaw - 180;
+									$deltaX = sin($yaw)*$blocks;
+									$deltaZ = cos($yaw)*$blocks;		
+				$blockingBlock = $this->getLevel()->getBlock(new Vector3(round($deltaX+$x), $this->y, round($deltaZ+$z))); // just for correction use 2 blocks ...
+			}catch(\InvalidStateException $ex){
+				// PureEntities::logOutput("Caught InvalidStateException for getTargetBlock", PureEntities::DEBUG);
+				echo"InvalidStateException for getTargetBlock";
+				return false;
+			}
+		}
+		var_dump($blockingBlock);
+		if($blockingBlock != null and !$blockingBlock->canPassThrough() and 1.2 > 0){ //1.2 -> $this->getMaxJumpHeight()
+			echo"On essaye de sauter";
+
+			// we cannot pass through the block that is directly in front of entity - check if jumping is possible
+			$upperBlock = $this->getLevel()->getBlock($blockingBlock->add(0, 1, 0));
+			$secondUpperBlock = $this->getLevel()->getBlock($blockingBlock->add(0, 2, 0));
+			// PureEntities::logOutput("$this: checkJump(): block in front is $blockingBlock, upperBlock is $upperBlock, second Upper block is $secondUpperBlock");
+			// check if we can get through the upper of the block directly in front of the entity
+			if($upperBlock->canPassThrough() && $secondUpperBlock->canPassThrough()){
+				echo"test 1";
+
+				if($blockingBlock instanceof Fence || $blockingBlock instanceof FenceGate){ // cannot pass fence or fence gate ...
+					$this->motion->y = $this->gravity;
+					// PureEntities::logOutput("$this: checkJump(): found fence or fence gate!", PureEntities::DEBUG);
+				}else if($blockingBlock instanceof StoneSlab or $blockingBlock instanceof Stair){ // on stairs entities shouldn't jump THAT high
+					$this->motion->y = $this->gravity * 4;
+					// PureEntities::logOutput("$this: checkJump(): found slab or stair!", PureEntities::DEBUG);
+				}else if($this->motion->y < ($this->gravity * 3.2)){ // Magic
+					// PureEntities::logOutput("$this: checkJump(): set motion to gravity * 3.2!", PureEntities::DEBUG);
+					$this->motion->y = $this->gravity * 3.2;
+				}else{
+					// PureEntities::logOutput("$this: checkJump(): nothing else!", PureEntities::DEBUG);
+					$this->motion->y += $this->gravity * 0.25;
+				}
+				return true;
+			}elseif(!$upperBlock->canPassThrough()){
+				echo"test 2";
+				// PureEntities::logOutput("$this: checkJump(): cannot pass through the upper blocks!", PureEntities::DEBUG);
+				$this->yaw = $this->getYaw() + mt_rand(-120, 120) / 10;
+			}
+		}else{
+			// PureEntities::logOutput("$this: checkJump(): no need to jump. Block can be passed! [canPassThrough:" . $blockingBlock->canPassThrough() . "] " .
+				// "[jumpHeight:" . $this->getMaxJumpHeight() . "] [checkedBlock:" . $blockingBlock . "]", PureEntities::DEBUG);
+				echo"test 3";
+		}
+		return false;
+	}
+
 
 
 	public function sprayBlood(Boss $entity, $amplifier) : void{
@@ -379,5 +501,6 @@ class Boss extends Creature{
 		$particle->setInvisible ();
 		$level->addParticle ( $particle );
 	}
+	
 
 }
